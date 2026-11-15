@@ -1,0 +1,50 @@
+name: Compilar APK desde ZIP
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descomprimir PylaMobile.zip
+        run: |
+          test -f PylaMobile.zip || { echo "Falta PylaMobile.zip en la raíz del repositorio"; exit 1; }
+          unzip -q PylaMobile.zip -d extraido
+          P=$(dirname "$(find extraido -name settings.gradle.kts | head -1)")
+          echo "P=$P" >> "$GITHUB_ENV"
+          echo "Proyecto en: $P"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Descargar modelos y plantillas de PylaAI
+        working-directory: ${{ env.P }}
+        run: |
+          git clone --depth 1 https://github.com/PylaAI/PylaAI.git /tmp/pyla
+          mkdir -p app/src/main/assets/models app/src/main/assets/templates app/src/main/assets/cfg
+          cp /tmp/pyla/models/mainInGameModel.onnx /tmp/pyla/models/tileDetector.onnx app/src/main/assets/models/
+          cp -r /tmp/pyla/images/states /tmp/pyla/images/end_results /tmp/pyla/images/star_drop_types app/src/main/assets/templates/
+          cp /tmp/pyla/cfg/brawlers_info.json app/src/main/assets/cfg/
+
+      - name: Aceptar licencias del SDK
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Compilar
+        working-directory: ${{ env.P }}
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PylaMobile-apk
+          path: ${{ env.P }}/app/build/outputs/apk/debug/*.apk
