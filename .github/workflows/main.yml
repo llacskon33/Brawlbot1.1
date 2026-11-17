@@ -1,3 +1,4 @@
+
 name: Compilar APK desde ZIP
 
 on:
@@ -5,46 +6,101 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Descargar repositorio
+        uses: actions/checkout@v5
 
-      - name: Descomprimir PylaMobile.zip
-        run: |
-          test -f PylaMobile.zip || { echo "Falta PylaMobile.zip en la raíz del repositorio"; exit 1; }
-          unzip -q PylaMobile.zip -d extraido
-          P=$(dirname "$(find extraido -name settings.gradle.kts | head -1)")
-          echo "P=$P" >> "$GITHUB_ENV"
-          echo "Proyecto en: $P"
-
-      - uses: actions/setup-java@v4
+      - name: Instalar Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - name: Descargar modelos y plantillas de PylaAI
+      - name: Descomprimir PylaMobile.zip
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f PylaMobile.zip ]; then
+            echo "ERROR: Falta PylaMobile.zip en la raíz."
+            exit 1
+          fi
+
+          unzip -q PylaMobile.zip -d extraido
+
+          SETTINGS=$(find extraido -name settings.gradle.kts -o -name settings.gradle | head -1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: No se encontró settings.gradle."
+            find extraido -maxdepth 3 -type f | head -100
+            exit 1
+          fi
+
+          P=$(dirname "$SETTINGS")
+          echo "P=$P" >> "$GITHUB_ENV"
+
+          echo "Proyecto encontrado: $P"
+          ls -la "$P"
+
+      - name: Descargar modelos y plantillas
         working-directory: ${{ env.P }}
         run: |
+          set -e
+
           git clone --depth 1 https://github.com/PylaAI/PylaAI.git /tmp/pyla
-          mkdir -p app/src/main/assets/models app/src/main/assets/templates app/src/main/assets/cfg
+
+          mkdir -p app/src/main/assets/models
+          mkdir -p app/src/main/assets/templates
+          mkdir -p app/src/main/assets/cfg
+
+          test -f /tmp/pyla/models/mainInGameModel.onnx
+          test -f /tmp/pyla/models/tileDetector.onnx
+          test -f /tmp/pyla/cfg/brawlers_info.json
+
           cp /tmp/pyla/models/mainInGameModel.onnx /tmp/pyla/models/tileDetector.onnx app/src/main/assets/models/
           cp -r /tmp/pyla/images/states /tmp/pyla/images/end_results /tmp/pyla/images/star_drop_types app/src/main/assets/templates/
           cp /tmp/pyla/cfg/brawlers_info.json app/src/main/assets/cfg/
 
-      - name: Aceptar licencias del SDK
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
 
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.9
+      - name: Aceptar licencias
+        run: yes | sdkmanager --licenses || true
 
-      - name: Compilar
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Comprobar Gradle
         working-directory: ${{ env.P }}
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          if [ -f gradlew ]; then
+            sed -i 's/\r$//' gradlew
+            chmod +x gradlew
+            ./gradlew --version
+          else
+            echo "No hay gradlew; se usará Gradle instalado."
+            gradle --version
+          fi
 
-      - uses: actions/upload-artifact@v4
+      - name: Compilar APK
+        working-directory: ${{ env.P }}
+        run: |
+          if [ -f gradlew ]; then
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
         with:
           name: PylaMobile-apk
           path: ${{ env.P }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
