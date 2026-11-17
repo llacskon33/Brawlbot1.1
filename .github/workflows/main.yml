@@ -1,10 +1,11 @@
-```yaml
 name: Compilar PS4toXboxMapper APK
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -24,13 +25,16 @@ jobs:
           java-version: '17'
 
       - name: Preparar Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: ''
-
-      - name: Aceptar licencias Android
         run: |
-          yes | sdkmanager --licenses || true
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "No se encontró sdkmanager"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "platform-tools"
 
       - name: Descomprimir proyecto
         run: |
@@ -46,9 +50,7 @@ jobs:
 
           unzip -q "$ZIP" -d extraido
 
-          SETTINGS=$(find extraido \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -print -quit)
+          SETTINGS=$(find extraido \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)
 
           if [ -z "$SETTINGS" ]; then
             echo "ERROR: No se encontró settings.gradle"
@@ -60,7 +62,6 @@ jobs:
           echo "P=$P" >> "$GITHUB_ENV"
 
           echo "Proyecto encontrado: $P"
-          ls -la "$P"
 
       - name: Preparar Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -80,10 +81,9 @@ jobs:
 
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Subir APK
+      - name: Descargar APK
         uses: actions/upload-artifact@v4
         with:
           name: PS4toXboxMapper-APK
           path: ${{ env.P }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-```
