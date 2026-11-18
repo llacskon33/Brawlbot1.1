@@ -40,7 +40,7 @@ jobs:
         run: |
           set -e
 
-          ZIP="PS4toXboxMapper-proyecto.zip"
+          ZIP="scrcpy-github-build.zip"
 
           if [ ! -f "$ZIP" ]; then
             echo "ERROR: No se encuentra $ZIP"
